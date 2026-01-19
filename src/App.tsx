@@ -2,11 +2,38 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Index from "./pages/Index";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { AnimatePresence } from "framer-motion";
+import Landing from "./pages/Landing";
+import Dashboard from "./pages/Dashboard";
+import LiveMap from "./pages/LiveMap";
+import AIAssistant from "./pages/AIAssistant";
+import WeatherRisk from "./pages/WeatherRisk";
+import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
+import Navigation from "./components/Navigation";
+import CustomCursor from "./components/CustomCursor";
+import ParticleField from "./components/ParticleField";
 
 const queryClient = new QueryClient();
+
+const AnimatedRoutes = () => {
+  const location = useLocation();
+  
+  return (
+    <AnimatePresence mode="wait">
+      <Routes location={location} key={location.pathname}>
+        <Route path="/" element={<Landing />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/map" element={<LiveMap />} />
+        <Route path="/assistant" element={<AIAssistant />} />
+        <Route path="/weather" element={<WeatherRisk />} />
+        <Route path="/profile" element={<Profile />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </AnimatePresence>
+  );
+};
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -14,11 +41,23 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <div className="relative min-h-screen bg-background">
+          {/* Custom Cursor - Hidden on mobile */}
+          <div className="hidden md:block">
+            <CustomCursor />
+          </div>
+          
+          {/* Particle Background */}
+          <ParticleField />
+          
+          {/* Navigation */}
+          <Navigation />
+          
+          {/* Main Content */}
+          <main className="relative z-20">
+            <AnimatedRoutes />
+          </main>
+        </div>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
