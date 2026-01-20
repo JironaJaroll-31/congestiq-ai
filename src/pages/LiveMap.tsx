@@ -3,7 +3,6 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { 
   MapPin, 
-  Navigation, 
   Layers, 
   CloudRain, 
   RefreshCw,
@@ -16,6 +15,7 @@ import {
 } from 'lucide-react';
 import PageTransition from '@/components/PageTransition';
 import GlassCard from '@/components/GlassCard';
+import WeatherWidget from '@/components/WeatherWidget';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -23,6 +23,28 @@ declare global {
   interface Window {
     google?: typeof google;
   }
+}
+
+interface WeatherData {
+  weather: {
+    temp: number;
+    feels_like: number;
+    humidity: number;
+    description: string;
+    icon: string;
+    wind_speed: number;
+    visibility: number;
+    city: string;
+  };
+  airQuality: {
+    aqi: number;
+    pm25: number;
+    pm10: number;
+  } | null;
+  trafficImpact: {
+    description: string;
+    level: number;
+  };
 }
 
 const routes = [
@@ -69,6 +91,11 @@ const LiveMap = () => {
   const [isLoadingKey, setIsLoadingKey] = useState(true);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
+  const [isLoadingWeather, setIsLoadingWeather] = useState(false);
+  const [weatherError, setWeatherError] = useState<string | null>(null);
+  const [calculatedRoutes, setCalculatedRoutes] = useState<google.maps.DirectionsRoute[]>([]);
+  
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const trafficLayerRef = useRef<google.maps.TrafficLayer | null>(null);
@@ -118,6 +145,35 @@ const LiveMap = () => {
     };
     fetchApiKey();
   }, []);
+
+  // Fetch weather data
+  const fetchWeather = useCallback(async (lat: number, lng: number) => {
+    setIsLoadingWeather(true);
+    setWeatherError(null);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('get-weather', {
+        body: { lat, lon: lng }
+      });
+      
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      
+      setWeatherData(data);
+    } catch (error) {
+      console.error('Error fetching weather:', error);
+      setWeatherError('Failed to load weather data');
+    } finally {
+      setIsLoadingWeather(false);
+    }
+  }, []);
+
+  // Fetch weather when location is available and weather is toggled
+  useEffect(() => {
+    if (showWeather && userLocation) {
+      fetchWeather(userLocation.lat, userLocation.lng);
+    }
+  }, [showWeather, userLocation, fetchWeather]);
 
   // Load Google Maps script manually after we have the API key
   useEffect(() => {
@@ -173,14 +229,24 @@ const LiveMap = () => {
     }
     trafficLayerRef.current = trafficLayer;
 
-    // Add directions renderer
+    // Add directions renderer with custom styling
     const directionsRenderer = new google.maps.DirectionsRenderer({
       polylineOptions: {
         strokeColor: '#00f0ff',
-        strokeWeight: 5,
-        strokeOpacity: 0.8,
+        strokeWeight: 6,
+        strokeOpacity: 0.9,
       },
       suppressMarkers: false,
+      markerOptions: {
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 8,
+          fillColor: '#00f0ff',
+          fillOpacity: 1,
+          strokeColor: '#ffffff',
+          strokeWeight: 2,
+        },
+      },
     });
     directionsRenderer.setMap(map);
     directionsRendererRef.current = directionsRenderer;
@@ -217,20 +283,28 @@ const LiveMap = () => {
                 map: mapRef.current,
                 icon: {
                   path: google.maps.SymbolPath.CIRCLE,
-                  scale: 10,
+                  scale: 12,
                   fillColor: '#00f0ff',
                   fillOpacity: 1,
-                  strokeColor: '#fff',
+                  strokeColor: '#ffffff',
                   strokeWeight: 3,
                 },
+                title: 'Your Location',
               });
             } else {
               userMarkerRef.current.setPosition(newLocation);
+            }
+            
+            // Pan to user location on first fix
+            if (!userMarkerRef.current) {
+              mapRef.current.panTo(newLocation);
             }
           }
         },
         (error) => {
           console.error('Error getting location:', error);
+          // Use default location if geolocation fails
+          setUserLocation(defaultCenter);
         },
         {
           enableHighAccuracy: true,
@@ -240,6 +314,9 @@ const LiveMap = () => {
       );
 
       return () => navigator.geolocation.clearWatch(watchId);
+    } else {
+      // Fallback to default location
+      setUserLocation(defaultCenter);
     }
   }, [mapLoaded]);
 
@@ -254,12 +331,17 @@ const LiveMap = () => {
   }, [userLocation]);
 
   const calculateRoute = async () => {
-    if (!destination.trim() || !userLocation) {
+    if (!destination.trim()) {
       toast.error('Please enter a destination');
       return;
     }
 
-    if (!mapLoaded) {
+    if (!userLocation) {
+      toast.error('Waiting for your location...');
+      return;
+    }
+
+    if (!mapLoaded || !window.google) {
       toast.error('Map is still loading');
       return;
     }
@@ -273,17 +355,37 @@ const LiveMap = () => {
         destination: destination,
         travelMode: google.maps.TravelMode.DRIVING,
         provideRouteAlternatives: true,
+        drivingOptions: {
+          departureTime: new Date(),
+          trafficModel: google.maps.TrafficModel.BEST_GUESS,
+        },
       });
 
-      if (directionsRendererRef.current) {
-        directionsRendererRef.current.setDirections(result);
+      if (result.routes && result.routes.length > 0) {
+        setCalculatedRoutes(result.routes);
+        
+        if (directionsRendererRef.current) {
+          directionsRendererRef.current.setDirections(result);
+          directionsRendererRef.current.setRouteIndex(0);
+        }
+        
+        toast.success(`Found ${result.routes.length} route(s)`);
+      } else {
+        toast.error('No routes found');
       }
-      toast.success(`Found ${result.routes.length} route(s)`);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error calculating route:', error);
-      toast.error('Could not find a route to that destination');
+      const errorMessage = error instanceof Error ? error.message : 'Could not find a route';
+      toast.error(errorMessage);
     } finally {
       setIsLoadingRoute(false);
+    }
+  };
+
+  const selectRoute = (index: number) => {
+    if (directionsRendererRef.current && calculatedRoutes.length > index) {
+      directionsRendererRef.current.setRouteIndex(index);
+      setSelectedRoute(index + 1);
     }
   };
 
@@ -291,6 +393,7 @@ const LiveMap = () => {
     if (directionsRendererRef.current) {
       directionsRendererRef.current.setDirections({ routes: [] } as google.maps.DirectionsResult);
     }
+    setCalculatedRoutes([]);
     setDestination('');
     toast.success('Route cleared');
   };
@@ -323,6 +426,23 @@ const LiveMap = () => {
       </PageTransition>
     );
   }
+
+  // Format route info from Google Directions
+  const getRouteInfo = (route: google.maps.DirectionsRoute, index: number) => {
+    const leg = route.legs[0];
+    const durationInTraffic = leg.duration_in_traffic?.text || leg.duration?.text || 'N/A';
+    const distance = leg.distance?.text || 'N/A';
+    const summary = route.summary || `Route ${index + 1}`;
+    
+    return {
+      id: index + 1,
+      name: index === 0 ? 'Fastest Route' : `Alternative ${index}`,
+      via: summary,
+      distance: distance,
+      time: durationInTraffic,
+      traffic: leg.duration_in_traffic ? 'Live Traffic' : 'Estimated',
+    };
+  };
 
   return (
     <PageTransition>
@@ -447,7 +567,7 @@ const LiveMap = () => {
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       onClick={calculateRoute}
-                      disabled={isLoadingRoute || !userLocation}
+                      disabled={isLoadingRoute}
                       className="glow-button py-3 px-6 disabled:opacity-50"
                     >
                       {isLoadingRoute ? (
@@ -461,50 +581,97 @@ const LiveMap = () => {
               </div>
             </GlassCard>
 
-            {/* Route Options */}
+            {/* Route Options & Weather */}
             <div className="space-y-4">
               <GlassCard delay={0.2} className="p-4">
                 <h3 className="font-semibold mb-3 flex items-center gap-2">
                   <Route className="w-5 h-5 text-primary" />
-                  Available Routes
+                  {calculatedRoutes.length > 0 ? 'Calculated Routes' : 'Available Routes'}
                 </h3>
                 <div className="space-y-3">
-                  {routes.map((route) => (
-                    <motion.div
-                      key={route.id}
-                      whileHover={{ x: 4 }}
-                      onClick={() => setSelectedRoute(route.id)}
-                      className={`p-3 rounded-xl cursor-pointer transition-all ${
-                        selectedRoute === route.id
-                          ? 'bg-primary/10 border border-primary/30'
-                          : 'bg-muted/30 border border-transparent hover:border-border/50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-medium text-sm">{route.name}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${
-                          route.traffic === 'Light' ? 'bg-traffic-low/20 text-traffic-low' :
-                          route.traffic === 'Moderate' ? 'bg-traffic-medium/20 text-traffic-medium' :
-                          'bg-muted text-muted-foreground'
-                        }`}>
-                          {route.traffic}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <MapPin className="w-3 h-3" />
-                          {route.distance}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {route.time}
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">via {route.via}</p>
-                    </motion.div>
-                  ))}
+                  {calculatedRoutes.length > 0 ? (
+                    // Show calculated routes from Google
+                    calculatedRoutes.map((route, index) => {
+                      const routeInfo = getRouteInfo(route, index);
+                      return (
+                        <motion.div
+                          key={index}
+                          whileHover={{ x: 4 }}
+                          onClick={() => selectRoute(index)}
+                          className={`p-3 rounded-xl cursor-pointer transition-all ${
+                            selectedRoute === index + 1
+                              ? 'bg-primary/10 border border-primary/30'
+                              : 'bg-muted/30 border border-transparent hover:border-border/50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-medium text-sm">{routeInfo.name}</span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary">
+                              {routeInfo.traffic}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              <MapPin className="w-3 h-3" />
+                              {routeInfo.distance}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {routeInfo.time}
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">via {routeInfo.via}</p>
+                        </motion.div>
+                      );
+                    })
+                  ) : (
+                    // Show placeholder routes
+                    routes.map((route) => (
+                      <motion.div
+                        key={route.id}
+                        whileHover={{ x: 4 }}
+                        onClick={() => setSelectedRoute(route.id)}
+                        className={`p-3 rounded-xl cursor-pointer transition-all ${
+                          selectedRoute === route.id
+                            ? 'bg-primary/10 border border-primary/30'
+                            : 'bg-muted/30 border border-transparent hover:border-border/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium text-sm">{route.name}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            route.traffic === 'Light' ? 'bg-traffic-low/20 text-traffic-low' :
+                            route.traffic === 'Moderate' ? 'bg-traffic-medium/20 text-traffic-medium' :
+                            'bg-muted text-muted-foreground'
+                          }`}>
+                            {route.traffic}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <MapPin className="w-3 h-3" />
+                            {route.distance}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {route.time}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">via {route.via}</p>
+                      </motion.div>
+                    ))
+                  )}
                 </div>
               </GlassCard>
+
+              {/* Weather Widget - shown when toggled */}
+              {showWeather && (
+                <WeatherWidget 
+                  data={weatherData} 
+                  isLoading={isLoadingWeather} 
+                  error={weatherError} 
+                />
+              )}
 
               <GlassCard delay={0.3} className="p-4">
                 <h3 className="font-semibold mb-3 flex items-center gap-2">
