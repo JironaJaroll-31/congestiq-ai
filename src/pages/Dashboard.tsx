@@ -1,3 +1,5 @@
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   Brain, 
@@ -8,22 +10,20 @@ import {
   MapPin,
   TrendingUp,
   TrendingDown,
-  Minus
+  Minus,
+  Navigation
 } from 'lucide-react';
 import PageTransition from '@/components/PageTransition';
 import GlassCard from '@/components/GlassCard';
 import AnimatedCounter from '@/components/AnimatedCounter';
+import { supabase } from '@/integrations/supabase/client';
 
-// Mock data for demo mode
-const mockData = {
-  aiRiskScore: 23,
-  congestionLevel: 42,
-  estimatedDelay: 12,
-  weatherImpact: 15,
-  accidentRisk: 8,
-  currentLocation: 'Downtown Financial District',
-  lastUpdated: 'Just now',
-};
+interface WeatherData {
+  temperature: number;
+  condition: string;
+  humidity: number;
+  trafficImpact: number;
+}
 
 const trendData = [
   { hour: '6AM', congestion: 20 },
@@ -34,12 +34,6 @@ const trendData = [
   { hour: '4PM', congestion: 65 },
   { hour: '6PM', congestion: 85 },
   { hour: '8PM', congestion: 35 },
-];
-
-const alerts = [
-  { id: 1, type: 'warning', message: 'Heavy traffic on Highway 101 - 25 min delay', time: '2 min ago' },
-  { id: 2, type: 'info', message: 'Weather alert: Light rain expected at 5PM', time: '15 min ago' },
-  { id: 3, type: 'success', message: 'Route optimized: Saved 12 minutes', time: '1 hour ago' },
 ];
 
 interface StatCardProps {
@@ -86,13 +80,139 @@ const StatCard = ({ icon: Icon, title, value, suffix = '', trend, trendValue, co
 };
 
 const Dashboard = () => {
-  const getCongestLevel = (value: number) => {
-    if (value < 30) return { label: 'Low', class: 'traffic-low' };
-    if (value < 60) return { label: 'Moderate', class: 'traffic-medium' };
-    return { label: 'High', class: 'traffic-high' };
+  const navigate = useNavigate();
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const [location, setLocation] = useState<{ lat: number; lng: number; address: string } | null>(null);
+  const [alerts, setAlerts] = useState<{ id: number; type: string; message: string; time: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      // Get user location
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const { latitude, longitude } = position.coords;
+            setLocation({
+              lat: latitude,
+              lng: longitude,
+              address: 'Current Location'
+            });
+
+            // Fetch weather data
+            const { data: weatherData, error } = await supabase.functions.invoke('get-weather', {
+              body: { lat: latitude, lon: longitude }
+            });
+
+            if (!error && weatherData) {
+              setWeather({
+                temperature: weatherData.temperature,
+                condition: weatherData.condition,
+                humidity: weatherData.humidity,
+                trafficImpact: weatherData.trafficImpact || 15
+              });
+
+              // Generate dynamic alerts based on weather
+              const dynamicAlerts = generateAlerts(weatherData);
+              setAlerts(dynamicAlerts);
+            }
+            setLoading(false);
+          },
+          () => {
+            // Use default location on error
+            setLocation({
+              lat: 40.7128,
+              lng: -74.0060,
+              address: 'Downtown Financial District'
+            });
+            setLoading(false);
+          }
+        );
+      } else {
+        setLoading(false);
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      setLoading(false);
+    }
   };
 
-  const congestion = getCongestLevel(mockData.congestionLevel);
+  const generateAlerts = (weatherData: WeatherData) => {
+    const alerts = [];
+    const now = new Date();
+    const hour = now.getHours();
+
+    // Weather-based alerts
+    if (weatherData.condition?.toLowerCase().includes('rain')) {
+      alerts.push({
+        id: 1,
+        type: 'warning',
+        message: `Rain expected - roads may be slippery. Current: ${Math.round(weatherData.temperature)}°C`,
+        time: 'Now'
+      });
+    }
+
+    // Time-based traffic alerts
+    if (hour >= 7 && hour <= 9) {
+      alerts.push({
+        id: 2,
+        type: 'warning',
+        message: 'Morning rush hour - expect 15-25 min delays on major routes',
+        time: '5 min ago'
+      });
+    } else if (hour >= 16 && hour <= 19) {
+      alerts.push({
+        id: 3,
+        type: 'warning',
+        message: 'Evening rush hour - congestion on highways',
+        time: '2 min ago'
+      });
+    }
+
+    // Always add a success alert
+    alerts.push({
+      id: 4,
+      type: 'success',
+      message: 'AI route optimization active - monitoring conditions',
+      time: '1 min ago'
+    });
+
+    return alerts;
+  };
+
+  const handleNavigateNow = () => {
+    navigate('/map');
+  };
+
+  const getCongestionLevel = () => {
+    const hour = new Date().getHours();
+    if (hour >= 7 && hour <= 9) return 68;
+    if (hour >= 16 && hour <= 19) return 75;
+    if (hour >= 22 || hour <= 5) return 15;
+    return 42;
+  };
+
+  const getAIRiskScore = () => {
+    const baseScore = 20;
+    const weatherPenalty = weather?.condition?.toLowerCase().includes('rain') ? 15 : 0;
+    const timePenalty = new Date().getHours() >= 16 && new Date().getHours() <= 19 ? 10 : 0;
+    return Math.min(baseScore + weatherPenalty + timePenalty, 100);
+  };
+
+  const congestionLevel = getCongestionLevel();
+  const aiRiskScore = getAIRiskScore();
+
+  const getCongestLevel = (value: number) => {
+    if (value < 30) return { label: 'Low', class: 'text-traffic-low' };
+    if (value < 60) return { label: 'Moderate', class: 'text-traffic-medium' };
+    return { label: 'High', class: 'text-traffic-high' };
+  };
+
+  const congestion = getCongestLevel(congestionLevel);
 
   return (
     <PageTransition>
@@ -109,9 +229,15 @@ const Dashboard = () => {
             </h1>
             <div className="flex items-center gap-2 text-muted-foreground">
               <MapPin className="w-4 h-4 text-primary" />
-              <span>{mockData.currentLocation}</span>
+              <span>{location?.address || 'Loading location...'}</span>
               <span className="text-primary">•</span>
-              <span>Updated {mockData.lastUpdated}</span>
+              <span>Updated just now</span>
+              {weather && (
+                <>
+                  <span className="text-primary">•</span>
+                  <span>{Math.round(weather.temperature)}°C, {weather.condition}</span>
+                </>
+              )}
             </div>
           </motion.div>
 
@@ -120,7 +246,7 @@ const Dashboard = () => {
             <StatCard
               icon={Brain}
               title="AI Risk Score"
-              value={mockData.aiRiskScore}
+              value={aiRiskScore}
               suffix="%"
               trend="down"
               trendValue="5%"
@@ -130,17 +256,17 @@ const Dashboard = () => {
             <StatCard
               icon={Activity}
               title="Congestion Level"
-              value={mockData.congestionLevel}
+              value={congestionLevel}
               suffix="%"
-              trend="up"
-              trendValue="12%"
-              color={mockData.congestionLevel < 30 ? 'green' : mockData.congestionLevel < 60 ? 'yellow' : 'red'}
+              trend={congestionLevel > 50 ? 'up' : 'down'}
+              trendValue={congestionLevel > 50 ? '12%' : '8%'}
+              color={congestionLevel < 30 ? 'green' : congestionLevel < 60 ? 'yellow' : 'red'}
               delay={0.1}
             />
             <StatCard
               icon={Clock}
               title="Est. Delay"
-              value={mockData.estimatedDelay}
+              value={Math.round(congestionLevel * 0.25)}
               suffix=" min"
               trend="stable"
               trendValue="0%"
@@ -150,9 +276,9 @@ const Dashboard = () => {
             <StatCard
               icon={CloudRain}
               title="Weather Impact"
-              value={mockData.weatherImpact}
+              value={weather?.trafficImpact || 15}
               suffix="%"
-              trend="up"
+              trend={weather?.condition?.toLowerCase().includes('rain') ? 'up' : 'stable'}
               trendValue="3%"
               color="cyan"
               delay={0.3}
@@ -160,7 +286,7 @@ const Dashboard = () => {
             <StatCard
               icon={AlertTriangle}
               title="Accident Risk"
-              value={mockData.accidentRisk}
+              value={Math.round(aiRiskScore * 0.4)}
               suffix="%"
               trend="down"
               trendValue="2%"
@@ -187,7 +313,7 @@ const Dashboard = () => {
                     key={item.hour}
                     initial={{ height: 0 }}
                     animate={{ height: `${item.congestion}%` }}
-                    transition={{ delay: 0.5 + index * 0.1, duration: 0.6, type: 'spring' as const }}
+                    transition={{ delay: 0.5 + index * 0.1, duration: 0.6, type: 'spring' }}
                     className="flex-1 rounded-t-lg relative group cursor-pointer"
                     style={{
                       background: item.congestion < 30 
@@ -218,7 +344,7 @@ const Dashboard = () => {
             <GlassCard delay={0.4} className="p-6">
               <h3 className="text-lg font-semibold mb-4">Live Alerts</h3>
               <div className="space-y-3">
-                {alerts.map((alert, index) => (
+                {alerts.length > 0 ? alerts.map((alert, index) => (
                   <motion.div
                     key={alert.id}
                     initial={{ opacity: 0, x: 20 }}
@@ -235,7 +361,9 @@ const Dashboard = () => {
                     <p className="text-sm mb-1">{alert.message}</p>
                     <p className="text-xs text-muted-foreground">{alert.time}</p>
                   </motion.div>
-                ))}
+                )) : (
+                  <p className="text-sm text-muted-foreground">No alerts at this time</p>
+                )}
               </div>
             </GlassCard>
           </div>
@@ -251,23 +379,29 @@ const Dashboard = () => {
               <div className="flex flex-col md:flex-row items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
                   <div className={`w-4 h-4 rounded-full animate-pulse ${
-                    mockData.congestionLevel < 30 ? 'bg-traffic-low' : 
-                    mockData.congestionLevel < 60 ? 'bg-traffic-medium' : 'bg-traffic-high'
+                    congestionLevel < 30 ? 'bg-traffic-low' : 
+                    congestionLevel < 60 ? 'bg-traffic-medium' : 'bg-traffic-high'
                   }`} />
                   <div>
                     <h4 className="font-semibold">
                       Current Traffic Status: <span className={congestion.class}>{congestion.label}</span>
                     </h4>
                     <p className="text-sm text-muted-foreground">
-                      AI recommends taking the scenic route via Riverside Drive
+                      {congestionLevel < 30 
+                        ? 'Clear roads ahead - great time to travel'
+                        : congestionLevel < 60 
+                        ? 'AI recommends taking the scenic route via Riverside Drive'
+                        : 'Consider delaying your trip or using public transit'}
                     </p>
                   </div>
                 </div>
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  className="glow-button text-sm py-2 px-6"
+                  onClick={handleNavigateNow}
+                  className="glow-button text-sm py-2 px-6 flex items-center gap-2"
                 >
+                  <Navigation className="w-4 h-4" />
                   Navigate Now
                 </motion.button>
               </div>
