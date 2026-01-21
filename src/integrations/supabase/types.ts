@@ -14,7 +14,96 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      chat_messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          role: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          role: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          role?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          accuracy_score: number | null
+          ai_predictions: number | null
+          appearance_animations: boolean | null
+          appearance_compact_view: boolean | null
+          appearance_dark_mode: boolean | null
+          created_at: string
+          display_name: string | null
+          id: string
+          location: string | null
+          notifications_route_suggestions: boolean | null
+          notifications_traffic_alerts: boolean | null
+          notifications_weather_updates: boolean | null
+          privacy_analytics: boolean | null
+          privacy_personalization: boolean | null
+          privacy_share_location: boolean | null
+          routes_optimized: number | null
+          time_saved_hours: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          accuracy_score?: number | null
+          ai_predictions?: number | null
+          appearance_animations?: boolean | null
+          appearance_compact_view?: boolean | null
+          appearance_dark_mode?: boolean | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          location?: string | null
+          notifications_route_suggestions?: boolean | null
+          notifications_traffic_alerts?: boolean | null
+          notifications_weather_updates?: boolean | null
+          privacy_analytics?: boolean | null
+          privacy_personalization?: boolean | null
+          privacy_share_location?: boolean | null
+          routes_optimized?: number | null
+          time_saved_hours?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          accuracy_score?: number | null
+          ai_predictions?: number | null
+          appearance_animations?: boolean | null
+          appearance_compact_view?: boolean | null
+          appearance_dark_mode?: boolean | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          location?: string | null
+          notifications_route_suggestions?: boolean | null
+          notifications_traffic_alerts?: boolean | null
+          notifications_weather_updates?: boolean | null
+          privacy_analytics?: boolean | null
+          privacy_personalization?: boolean | null
+          privacy_share_location?: boolean | null
+          routes_optimized?: number | null
+          time_saved_hours?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Mic, 
@@ -8,50 +8,48 @@ import {
   User, 
   Volume2,
   Loader2,
-  Sparkles
+  Sparkles,
+  Trash2
 } from 'lucide-react';
 import PageTransition from '@/components/PageTransition';
 import GlassCard from '@/components/GlassCard';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 interface Message {
-  id: number;
+  id: string;
   type: 'user' | 'assistant';
   content: string;
   timestamp: Date;
 }
 
+interface WeatherContext {
+  temperature?: number;
+  condition?: string;
+  humidity?: number;
+}
+
 const quickActions = [
-  "Is traffic heavy ahead?",
-  "Suggest fastest route",
-  "Will rain affect travel?",
-  "Show alternate roads",
-  "What's my ETA?",
-  "Report an incident",
+  "What's the traffic like right now?",
+  "Suggest the fastest route home",
+  "Will weather affect my commute?",
+  "Show alternate routes",
+  "What's my estimated travel time?",
+  "Are there any accidents nearby?",
 ];
 
-const mockResponses: Record<string, string> = {
-  "is traffic heavy ahead?": "Based on real-time data, there's moderate congestion on your current route. The main bottleneck is near the Downtown intersection, with an estimated 12-minute delay. I recommend taking the Riverside alternate route to save approximately 8 minutes.",
-  "suggest fastest route": "I've analyzed 3 possible routes to your destination. The fastest option is via Highway 101 → Exit 15 → Main Street, with an estimated arrival time of 23 minutes. This route avoids the construction zone on 5th Avenue.",
-  "will rain affect travel?": "Light rain is expected to begin around 5:00 PM. Based on historical data, this typically increases congestion by 15-20% in your area. I recommend departing before 4:30 PM to avoid weather-related delays.",
-  "show alternate roads": "I've identified 2 alternate routes: 1) Riverside Drive (26 min, scenic, low traffic) 2) Industrial Boulevard (24 min, moderate traffic). Both avoid the current congestion hotspot downtown.",
-  "what's my eta?": "Your current estimated time of arrival is 4:47 PM. This accounts for current traffic conditions, upcoming weather changes, and typical patterns for this time of day.",
-  "report an incident": "Thank you for helping keep roads safe. To report an incident, please provide: 1) Location (address or landmark) 2) Type of incident (accident, road hazard, etc.) 3) Any additional details. I'll notify other drivers and update route recommendations.",
-};
-
 const AIAssistant = () => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 1,
-      type: 'assistant',
-      content: "Hello! I'm your AI traffic assistant. Ask me about traffic conditions, routes, weather impacts, or anything related to your journey. How can I help you today?",
-      timestamp: new Date(),
-    },
-  ]);
+  const { user } = useAuth();
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [weatherContext, setWeatherContext] = useState<WeatherContext | null>(null);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -61,11 +59,109 @@ const AIAssistant = () => {
     scrollToBottom();
   }, [messages]);
 
+  // Load chat history
+  useEffect(() => {
+    if (user) {
+      loadChatHistory();
+      fetchWeatherContext();
+      getUserLocation();
+    }
+  }, [user]);
+
+  const loadChatHistory = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('user_id', user?.id)
+        .order('created_at', { ascending: true })
+        .limit(50);
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        const loadedMessages: Message[] = data.map((msg) => ({
+          id: msg.id,
+          type: msg.role as 'user' | 'assistant',
+          content: msg.content,
+          timestamp: new Date(msg.created_at),
+        }));
+        setMessages(loadedMessages);
+      } else {
+        // Add welcome message for new users
+        setMessages([{
+          id: 'welcome',
+          type: 'assistant',
+          content: "Hello! I'm your AI traffic assistant powered by real-time data. Ask me about traffic conditions, route suggestions, weather impacts, or anything related to your journey. How can I help you today?",
+          timestamp: new Date(),
+        }]);
+      }
+    } catch (error) {
+      console.error('Error loading chat history:', error);
+    }
+  };
+
+  const fetchWeatherContext = async () => {
+    try {
+      // Get user location first
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(async (position) => {
+          const { latitude, longitude } = position.coords;
+          setUserLocation({ lat: latitude, lng: longitude });
+          
+          const { data, error } = await supabase.functions.invoke('get-weather', {
+            body: { lat: latitude, lon: longitude }
+          });
+
+          if (!error && data) {
+            setWeatherContext({
+              temperature: data.temperature,
+              condition: data.condition,
+              humidity: data.humidity
+            });
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching weather:', error);
+    }
+  };
+
+  const getUserLocation = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          });
+        },
+        (error) => console.error('Geolocation error:', error)
+      );
+    }
+  };
+
+  const saveMessage = async (role: 'user' | 'assistant', content: string) => {
+    if (!user) return;
+    
+    try {
+      await supabase
+        .from('chat_messages')
+        .insert({
+          user_id: user.id,
+          role,
+          content
+        });
+    } catch (error) {
+      console.error('Error saving message:', error);
+    }
+  };
+
   const handleSend = async (text: string = input) => {
-    if (!text.trim()) return;
+    if (!text.trim() || isTyping) return;
 
     const userMessage: Message = {
-      id: Date.now(),
+      id: Date.now().toString(),
       type: 'user',
       content: text,
       timestamp: new Date(),
@@ -75,40 +171,128 @@ const AIAssistant = () => {
     setInput('');
     setIsTyping(true);
 
-    // Simulate AI thinking
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // Save user message
+    await saveMessage('user', text);
 
-    const response = mockResponses[text.toLowerCase()] || 
-      "I understand your question. Based on my analysis of current traffic patterns and conditions, I recommend checking the Live Map for real-time updates. Is there anything specific about your route you'd like me to help with?";
+    try {
+      // Build conversation history for context
+      const conversationHistory = messages.slice(-10).map(msg => ({
+        role: msg.type,
+        content: msg.content
+      }));
+      conversationHistory.push({ role: 'user', content: text });
 
-    const assistantMessage: Message = {
-      id: Date.now() + 1,
-      type: 'assistant',
-      content: response,
-      timestamp: new Date(),
-    };
+      const { data, error } = await supabase.functions.invoke('ai-chat', {
+        body: {
+          messages: conversationHistory,
+          weatherContext,
+          locationContext: userLocation,
+          userId: user?.id
+        }
+      });
 
-    setMessages(prev => [...prev, assistantMessage]);
-    setIsTyping(false);
+      if (error) throw error;
+
+      const assistantContent = data?.message || "I apologize, but I couldn't process your request. Please try again.";
+
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        type: 'assistant',
+        content: assistantContent,
+        timestamp: new Date(),
+      };
+
+      setMessages(prev => [...prev, assistantMessage]);
+      
+      // Save assistant message
+      await saveMessage('assistant', assistantContent);
+
+    } catch (error) {
+      console.error('AI Chat error:', error);
+      toast.error('Failed to get response. Please try again.');
+      
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        type: 'assistant',
+        content: "I'm having trouble connecting right now. Please check your connection and try again.",
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   const toggleListening = () => {
-    setIsListening(!isListening);
-    // In production, this would integrate with Web Speech API
-    if (!isListening) {
-      setTimeout(() => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      toast.error('Speech recognition is not supported in your browser');
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+    } else {
+      const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const recognition = new SpeechRecognitionAPI();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        setInput(transcript);
         setIsListening(false);
-        setInput("What's the traffic like downtown?");
-      }, 2000);
+      };
+
+      recognition.onerror = () => {
+        setIsListening(false);
+        toast.error('Failed to recognize speech');
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+      setIsListening(true);
     }
   };
 
   const speakMessage = (text: string) => {
     if ('speechSynthesis' in window) {
+      speechSynthesis.cancel();
       setIsSpeaking(true);
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
       speechSynthesis.speak(utterance);
+    }
+  };
+
+  const clearHistory = async () => {
+    if (!user) return;
+    
+    try {
+      const { error } = await supabase
+        .from('chat_messages')
+        .delete()
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setMessages([{
+        id: 'welcome',
+        type: 'assistant',
+        content: "Chat history cleared. How can I help you with your journey today?",
+        timestamp: new Date(),
+      }]);
+      
+      toast.success('Chat history cleared');
+    } catch (error) {
+      console.error('Error clearing history:', error);
+      toast.error('Failed to clear history');
     }
   };
 
@@ -130,12 +314,31 @@ const AIAssistant = () => {
               Voice <span className="text-gradient">Navigation</span>
             </h1>
             <p className="text-muted-foreground">
-              Ask me anything about traffic, routes, and conditions
+              Real-time traffic intelligence at your fingertips
             </p>
+            {weatherContext && (
+              <p className="text-xs text-muted-foreground mt-2">
+                Current: {Math.round(weatherContext.temperature || 0)}°C, {weatherContext.condition}
+              </p>
+            )}
           </motion.div>
 
           {/* Chat Container */}
           <GlassCard delay={0.1} className="mb-6 p-0 overflow-hidden">
+            {/* Header with clear button */}
+            <div className="flex items-center justify-between p-4 border-b border-border/50">
+              <span className="text-sm text-muted-foreground">
+                {messages.length > 1 ? `${messages.length} messages` : 'Start a conversation'}
+              </span>
+              <button
+                onClick={clearHistory}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+              >
+                <Trash2 className="w-3 h-3" />
+                Clear
+              </button>
+            </div>
+
             {/* Messages */}
             <div className="h-[400px] overflow-y-auto p-6 space-y-4">
               <AnimatePresence>
@@ -157,7 +360,7 @@ const AIAssistant = () => {
                         ? 'bg-primary text-primary-foreground rounded-2xl rounded-tr-sm' 
                         : 'bg-muted/50 rounded-2xl rounded-tl-sm'
                     } p-4`}>
-                      <p className="text-sm leading-relaxed">{message.content}</p>
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
                       <div className="flex items-center gap-2 mt-2">
                         <span className="text-xs opacity-60">
                           {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -264,7 +467,8 @@ const AIAssistant = () => {
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => handleSend(action)}
-                  className="px-4 py-2 text-sm rounded-full bg-muted/50 border border-border/50 hover:border-primary/50 hover:bg-primary/10 transition-colors"
+                  disabled={isTyping}
+                  className="px-4 py-2 text-sm rounded-full bg-muted/50 border border-border/50 hover:border-primary/50 hover:bg-primary/10 transition-colors disabled:opacity-50"
                 >
                   {action}
                 </motion.button>
