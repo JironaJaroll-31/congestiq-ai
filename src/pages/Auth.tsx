@@ -92,8 +92,8 @@ const Auth = () => {
             toast.error(error.message);
           }
         } else {
-          toast.success('Account created successfully!');
-          navigate('/dashboard');
+          toast.success('Please check your email to verify your account!');
+          // Don't navigate - user needs to verify email first
         }
       }
     } finally {
