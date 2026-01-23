@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import { AuthProvider } from "./contexts/AuthContext";
+import { ThemeProvider } from "./contexts/ThemeContext";
 import Landing from "./pages/Landing";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -42,29 +43,31 @@ const AnimatedRoutes = () => {
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <div className="relative min-h-screen bg-background">
-            {/* Custom Cursor - Hidden on mobile */}
-            <div className="hidden md:block">
-              <CustomCursor />
+      <ThemeProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <div className="relative min-h-screen bg-background">
+              {/* Custom Cursor - Hidden on mobile */}
+              <div className="hidden md:block">
+                <CustomCursor />
+              </div>
+              
+              {/* Particle Background */}
+              <ParticleField />
+              
+              {/* Navigation */}
+              <Navigation />
+              
+              {/* Main Content */}
+              <main className="relative z-20">
+                <AnimatedRoutes />
+              </main>
             </div>
-            
-            {/* Particle Background */}
-            <ParticleField />
-            
-            {/* Navigation */}
-            <Navigation />
-            
-            {/* Main Content */}
-            <main className="relative z-20">
-              <AnimatedRoutes />
-            </main>
-          </div>
-        </BrowserRouter>
-      </TooltipProvider>
+          </BrowserRouter>
+        </TooltipProvider>
+      </ThemeProvider>
     </AuthProvider>
   </QueryClientProvider>
 );

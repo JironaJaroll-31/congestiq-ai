@@ -19,13 +19,16 @@ import {
 import PageTransition from '@/components/PageTransition';
 import GlassCard from '@/components/GlassCard';
 import AnimatedCounter from '@/components/AnimatedCounter';
+import ProfilePictureUpload from '@/components/ProfilePictureUpload';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 interface ProfileData {
   display_name: string | null;
   location: string | null;
+  avatar_url: string | null;
   notifications_traffic_alerts: boolean;
   notifications_weather_updates: boolean;
   notifications_route_suggestions: boolean;
@@ -44,6 +47,7 @@ interface ProfileData {
 
 const Profile = () => {
   const { user, signOut } = useAuth();
+  const { isDarkMode, setIsDarkMode, animationsEnabled, setAnimationsEnabled, compactView, setCompactView } = useTheme();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -55,6 +59,15 @@ const Profile = () => {
       fetchProfile();
     }
   }, [user]);
+
+  // Sync theme context with profile data
+  useEffect(() => {
+    if (profile) {
+      setIsDarkMode(profile.appearance_dark_mode);
+      setAnimationsEnabled(profile.appearance_animations);
+      setCompactView(profile.appearance_compact_view);
+    }
+  }, [profile?.appearance_dark_mode, profile?.appearance_animations, profile?.appearance_compact_view]);
 
   const fetchProfile = async () => {
     try {
@@ -88,7 +101,20 @@ const Profile = () => {
       if (error) throw error;
       
       setProfile(prev => prev ? { ...prev, [key]: value } : null);
-      toast.success('Setting updated');
+      
+      // Apply theme changes immediately
+      if (key === 'appearance_dark_mode') {
+        setIsDarkMode(value as boolean);
+        toast.success(value ? 'Dark mode enabled' : 'Light mode enabled');
+      } else if (key === 'appearance_animations') {
+        setAnimationsEnabled(value as boolean);
+        toast.success(value ? 'Animations enabled' : 'Animations disabled');
+      } else if (key === 'appearance_compact_view') {
+        setCompactView(value as boolean);
+        toast.success(value ? 'Compact view enabled' : 'Standard view enabled');
+      } else {
+        toast.success('Setting updated');
+      }
     } catch (error) {
       console.error('Error updating setting:', error);
       toast.error('Failed to update setting');
@@ -101,6 +127,10 @@ const Profile = () => {
     if (!newDisplayName.trim()) return;
     await updateSetting('display_name', newDisplayName.trim());
     setEditingName(false);
+  };
+
+  const handleAvatarUpdate = (url: string | null) => {
+    setProfile(prev => prev ? { ...prev, avatar_url: url } : null);
   };
 
   const handleLogout = async () => {
@@ -126,30 +156,36 @@ const Profile = () => {
       category: 'Notifications',
       icon: Bell,
       options: [
-        { key: 'notifications_traffic_alerts' as keyof ProfileData, label: 'Traffic Alerts', enabled: profile?.notifications_traffic_alerts ?? true },
-        { key: 'notifications_weather_updates' as keyof ProfileData, label: 'Weather Updates', enabled: profile?.notifications_weather_updates ?? true },
-        { key: 'notifications_route_suggestions' as keyof ProfileData, label: 'Route Suggestions', enabled: profile?.notifications_route_suggestions ?? false },
+        { key: 'notifications_traffic_alerts' as keyof ProfileData, label: 'Traffic Alerts', description: 'Get notified about traffic on your routes' },
+        { key: 'notifications_weather_updates' as keyof ProfileData, label: 'Weather Updates', description: 'Receive weather-related travel advisories' },
+        { key: 'notifications_route_suggestions' as keyof ProfileData, label: 'Route Suggestions', description: 'AI-powered route recommendations' },
       ]
     },
     { 
       category: 'Privacy',
       icon: Shield,
       options: [
-        { key: 'privacy_share_location' as keyof ProfileData, label: 'Share Location', enabled: profile?.privacy_share_location ?? true },
-        { key: 'privacy_analytics' as keyof ProfileData, label: 'Analytics', enabled: profile?.privacy_analytics ?? true },
-        { key: 'privacy_personalization' as keyof ProfileData, label: 'Personalization', enabled: profile?.privacy_personalization ?? true },
+        { key: 'privacy_share_location' as keyof ProfileData, label: 'Share Location', description: 'Allow location access for accurate routing' },
+        { key: 'privacy_analytics' as keyof ProfileData, label: 'Analytics', description: 'Help improve CongestiQ with usage data' },
+        { key: 'privacy_personalization' as keyof ProfileData, label: 'Personalization', description: 'Enable personalized route suggestions' },
       ]
     },
     { 
       category: 'Appearance',
       icon: Palette,
       options: [
-        { key: 'appearance_dark_mode' as keyof ProfileData, label: 'Dark Mode', enabled: profile?.appearance_dark_mode ?? true },
-        { key: 'appearance_animations' as keyof ProfileData, label: 'Animations', enabled: profile?.appearance_animations ?? true },
-        { key: 'appearance_compact_view' as keyof ProfileData, label: 'Compact View', enabled: profile?.appearance_compact_view ?? false },
+        { key: 'appearance_dark_mode' as keyof ProfileData, label: 'Dark Mode', description: 'Switch between dark and light themes' },
+        { key: 'appearance_animations' as keyof ProfileData, label: 'Animations', description: 'Enable smooth UI animations' },
+        { key: 'appearance_compact_view' as keyof ProfileData, label: 'Compact View', description: 'Use smaller spacing and elements' },
       ]
     },
   ];
+
+  const getSettingValue = (key: keyof ProfileData): boolean => {
+    if (!profile) return false;
+    const value = profile[key];
+    return typeof value === 'boolean' ? value : false;
+  };
 
   if (loading) {
     return (
@@ -166,19 +202,11 @@ const Profile = () => {
           {/* Profile Header */}
           <GlassCard delay={0} className="p-6 mb-6">
             <div className="flex flex-col md:flex-row items-center gap-6">
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ type: 'spring', damping: 15 }}
-                className="relative"
-              >
-                <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
-                  <User className="w-12 h-12 text-background" />
-                </div>
-                <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-traffic-low flex items-center justify-center border-4 border-background">
-                  <Award className="w-4 h-4 text-background" />
-                </div>
-              </motion.div>
+              <ProfilePictureUpload
+                userId={user?.id || ''}
+                currentAvatarUrl={profile?.avatar_url || null}
+                onAvatarUpdate={handleAvatarUpdate}
+              />
               <div className="text-center md:text-left flex-1">
                 {editingName ? (
                   <div className="flex items-center gap-2 mb-1">
@@ -257,27 +285,34 @@ const Profile = () => {
                     <h3 className="font-medium">{section.category}</h3>
                   </div>
                   <div className="space-y-2 pl-7">
-                    {section.options.map((option) => (
-                      <div
-                        key={option.key}
-                        className="flex items-center justify-between p-3 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors group cursor-pointer"
-                        onClick={() => updateSetting(option.key, !option.enabled)}
-                      >
-                        <span className="text-sm">{option.label}</span>
-                        <div className="flex items-center gap-2">
-                          <div className={`w-10 h-6 rounded-full p-1 transition-colors ${
-                            option.enabled ? 'bg-primary' : 'bg-muted'
-                          }`}>
-                            <motion.div
-                              initial={false}
-                              animate={{ x: option.enabled ? 16 : 0 }}
-                              className="w-4 h-4 rounded-full bg-background"
-                            />
+                    {section.options.map((option) => {
+                      const isEnabled = getSettingValue(option.key);
+                      return (
+                        <div
+                          key={option.key}
+                          className="flex items-center justify-between p-3 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors group cursor-pointer"
+                          onClick={() => updateSetting(option.key, !isEnabled)}
+                        >
+                          <div className="flex-1">
+                            <span className="text-sm font-medium">{option.label}</span>
+                            <p className="text-xs text-muted-foreground">{option.description}</p>
                           </div>
-                          <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                          <div className="flex items-center gap-2">
+                            <div className={`w-11 h-6 rounded-full p-0.5 transition-colors ${
+                              isEnabled ? 'bg-primary' : 'bg-muted-foreground/30'
+                            }`}>
+                              <motion.div
+                                initial={false}
+                                animate={{ x: isEnabled ? 20 : 0 }}
+                                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                                className="w-5 h-5 rounded-full bg-background shadow-md"
+                              />
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </motion.div>
               ))}

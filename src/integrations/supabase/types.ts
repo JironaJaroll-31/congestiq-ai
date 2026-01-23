@@ -45,6 +45,7 @@ export type Database = {
           appearance_animations: boolean | null
           appearance_compact_view: boolean | null
           appearance_dark_mode: boolean | null
+          avatar_url: string | null
           created_at: string
           display_name: string | null
           id: string
@@ -66,6 +67,7 @@ export type Database = {
           appearance_animations?: boolean | null
           appearance_compact_view?: boolean | null
           appearance_dark_mode?: boolean | null
+          avatar_url?: string | null
           created_at?: string
           display_name?: string | null
           id?: string
@@ -87,6 +89,7 @@ export type Database = {
           appearance_animations?: boolean | null
           appearance_compact_view?: boolean | null
           appearance_dark_mode?: boolean | null
+          avatar_url?: string | null
           created_at?: string
           display_name?: string | null
           id?: string
